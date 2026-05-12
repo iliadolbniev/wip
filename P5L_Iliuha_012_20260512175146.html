@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Iliuha_012</title>
+	<meta charset="utf-8">
+	<!-- Compiled w/ P5LIVE, http://github.com/ffd8/p5live -->
+	<style type="text/css">
+		body{
+			margin:0;
+			overflow:hidden;
+		}
+		canvas{
+			position:fixed;
+			top:0;
+			left:0;
+			z-index:-1;
+			width:100vw;
+			height:100vh;
+			margin:0;
+		}
+	</style>
+	<script type="text/javascript">
+		// eco-mode = only render if window focused
+		window.onblur = function () {
+			noLoop();
+		};
+		window.onfocus = function () {
+			loop();
+		};
+	</script>
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/p5@1/lib/p5.min.js"></script>
+<script type="text/javascript" src="https://cdn.jsdelivr.net/gh/processing/p5.js-sound/lib/p5.sound.min.js"></script>
+</head>
+<body style="background: rgb(0, 0, 0);">
+
+<script type="text/javascript">
+//Iliuha_012
+
+/* CUSTOM FUNCTIONS FOR P5LIVE */
+// keep fullscreen if window resized
+function windowResized() {
+	resizeCanvas(windowWidth, windowHeight);
+}
+
+// custom ease function
+function ease(iVal, oVal, eVal){
+	return oVal += (iVal - oVal) * eVal;
+}
+
+// processing compatibility
+function println(msg){
+	print(msg);
+}
+
+
+// --- CUSTOMIZABLE ---
+let darkColor = [20, 20, 20];  
+let lightColor = [75, 55, 230]; 
+let neonColor = [155, 85, 230, 0];
+let terracotta = '#E24C33'; 
+let glowAmount = 10; 
+let waveScale = 2;         
+let gridSensitivity = 1.5; 
+let smoothCircleSize = 0;
+
+// --- UI & COLOR THEMES ---
+let colorIndex = 0;
+let colorThemes = [
+  { dark: [20, 20, 20], light: [75, 55, 230] }, 
+  { dark: [155, 85, 230], light: [255, 253, 140] }, 
+  { dark: [0, 0, 0], light: [255, 255, 255] }      
+];
+
+let colorBtn, glowSlider, splitSlider, speedSlider, randomBtn, resetBtn;
+let motionToggle, toggle;
+let isMotionEnabled = true;
+let isInverted = false;
+
+// --- ANIMATION VARIABLES ---
+let runningOffset = 0;
+let mic, fft, amplitude;
+let sensitivity = 20; 
+let myImg;
+
+function preload() {
+  let imgUrl = 'https://raw.githubusercontent.com/iliadolbniev/wip/refs/heads/main/4.png';
+  myImg = loadImage(imgUrl);
+}
+
+function setup() {
+  createCanvas(windowWidth, windowHeight);
+  mic = new p5.AudioIn();
+  mic.start();
+  amplitude = new p5.Amplitude();
+  amplitude.setInput(mic);
+  fft = new p5.FFT(0.8); 
+  fft.setInput(mic);
+  angleMode(DEGREES);
+  
+  initUI();
+}
+
+function initUI() {
+  let uiX = 30; 
+  let swW = 45; 
+  let swH = 24; 
+  
+  motionToggle = new IOSSwitch(uiX, 50, swW, swH, "MOTION");
+  toggle = new IOSSwitch(uiX, 100, swW, swH, "INVERT");
+  
+  colorBtn = new ColorButton(uiX, 150, 60, 25, "THEME");
+  randomBtn = new ColorButton(uiX, 190, 55, 22, "RANDOM");
+  resetBtn = new ColorButton(uiX + 60, 190, 45, 22, "RESET");
+  
+  glowSlider = new CustomSlider(uiX, 240, 100, 15, 1, 50, 10, "GLOW");
+  splitSlider = new StepSlider(uiX, 290, 100, 15, 0, 3, 0); 
+  speedSlider = new CustomSlider(uiX, 340, 100, 15, 0, 10, 2, "SPEED"); 
+}
+
+function draw() {
+  let currentDark = colorThemes[colorIndex].dark;
+  let currentLight = colorThemes[colorIndex].light;
+  background(isInverted ? currentLight : currentDark);
+  
+  let splitOptions = [1, 3, 5, 7];
+  let splitIdx = splitSlider.value;
+  let totalSections = splitOptions[splitIdx];
+  let sectionWidth = width / totalSections;
+  
+  let canMove = (totalSections > 1);
+  let moveSpeed = (isMotionEnabled && canMove) ? speedSlider.value : 0;
+  runningOffset += moveSpeed;
+
+  if (totalSections === 1) {
+    fill(isInverted ? currentLight : currentDark);
+    noStroke();
+    rect(0, 0, width, height);
+  } else {
+    for (let i = -4; i < totalSections + 4; i++) {
+      let isAlt = i % 2 === 0;
+      let stripeCol = isInverted ? (isAlt ? currentLight : currentDark) : (isAlt ? currentDark : currentLight);
+      fill(stripeCol); noStroke();
+      let xPos = (i * sectionWidth) + (runningOffset % (sectionWidth * 2));
+      rect(xPos, 0, sectionWidth + 2, height); 
+    }
+  }
+  
+  if (myImg) {
+    imageMode(CENTER); blendMode(DIFFERENCE); tint(255, 225);
+    image(myImg, width/2, height/2, width, 2000); 
+    blendMode(BLEND); noTint();
+  }
+  
+  let boostedVol = constrain(amplitude.getLevel() * sensitivity, 0, 1);
+  let wave = fft.waveform(); 
+
+  // --- FIXED COLOR LOGIC ---
+  // Shapes now use static theme colors to prevent "auto-changing" during motion
+  let sideShapeColor = isInverted ? currentDark : currentLight;
+  let centerShapeColor = isInverted ? currentDark : currentLight;
+
+  glowAmount = glowSlider.value;
+  drawingContext.filter = `blur(${glowAmount}px)`;
+  drawVisuals(boostedVol, fft.analyze(), wave, sideShapeColor, centerShapeColor);
+  drawingContext.filter = 'none';
+  drawVisuals(boostedVol, fft.analyze(), wave, sideShapeColor, centerShapeColor);
+
+  let uiTextCol = isInverted ? currentDark : currentLight;
+  let uiBgCol = isInverted ? currentDark : currentLight;
+  let uiInnerCol = isInverted ? currentLight : currentDark;
+
+  motionToggle.display(isMotionEnabled, uiTextCol, !canMove);
+  toggle.display(isInverted, uiTextCol, false);
+  colorBtn.display(uiBgCol, uiInnerCol);
+  randomBtn.display(uiBgCol, uiInnerCol);
+  resetBtn.display(uiBgCol, uiInnerCol);
+  glowSlider.display(uiTextCol, false);
+  splitSlider.display(uiTextCol);
+  speedSlider.display(uiTextCol, (!isMotionEnabled || !canMove));
+
+  fill(uiTextCol);
+  noStroke();
+  textSize(12);
+  textStyle(BOLD);
+  textAlign(LEFT, BOTTOM);
+  text("visuals by Illia Dolbniev for ISHOBEATS", 30, height - 40);
+} 
+
+function drawVisuals(boostedVol, spectrum, wave, sideCol, centerCol) {
+  let third = width / 3; 
+  let isGateOpen = boostedVol > 0.25; 
+
+  noFill(); 
+  stroke(centerCol); 
+  strokeWeight(map(boostedVol, 0, 1, 3, 5)); 
+  
+  beginShape();
+  // --- GAP FIX ---
+  // curveVertex requires the first and last points to be duplicated to start/end exactly at the coordinate
+  for (let j = 0; j < wave.length; j += 10) { 
+    let h = isGateOpen ? ((wave[j] - wave[(j+10)%wave.length]) * 200 * waveScale) : 0;
+    let vx = map(j, 0, wave.length - 1, 0, width); 
+    
+    if (j === 0) curveVertex(vx, (height / 2) + h); // Duplicate first point
+    curveVertex(vx, (height / 2) + h);
+    if (j >= wave.length - 10) curveVertex(vx, (height / 2) + h); // Duplicate last point
+  }
+  endShape();
+
+  stroke(sideCol); strokeWeight(80); 
+  let lineLen = map(boostedVol, 0, 1, 100, height * 0.7);
+  line(third * 0.5, height/2 - lineLen/2, third * 0.5, height/2 + lineLen/2);
+  
+  smoothCircleSize = lerp(smoothCircleSize, map(boostedVol, 0, 1, 20, third * 0.7), 0.3);
+  noStroke(); fill(sideCol);
+  ellipse(width - (third * 0.5), height/2, smoothCircleSize);
+
+  push();
+  translate(width/2 - 175, height/2 - 175); 
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      if ((r + c) % 2 === 0) {
+        fill(centerCol);
+        let val = spectrum[floor(map(r*8+c, 0, 64, 0, spectrum.length*0.4))] * gridSensitivity;
+        rect(c*44, r*44, 44, map(val, 0, 200, 0, 44, true));
+      } else {
+        fill(neonColor); rect(c*44, r*44, 44, 44);
+      }
+    }
+  }
+  pop();
+}
+
+function mousePressed() { 
+  let splitIdx = splitSlider.value;
+  let canMove = (splitIdx > 0);
+  
+  if (canMove && motionToggle.clicked(mouseX, mouseY)) isMotionEnabled = !isMotionEnabled;
+  if (toggle.clicked(mouseX, mouseY)) isInverted = !isInverted; 
+  if (colorBtn.clicked(mouseX, mouseY)) colorIndex = (colorIndex + 1) % colorThemes.length;
+  
+  if (randomBtn.clicked(mouseX, mouseY)) {
+    isInverted = random([true, false]);
+    colorIndex = floor(random(colorThemes.length));
+    glowSlider.value = random(1, 50);
+    splitSlider.value = floor(random(4));
+    speedSlider.value = random(0, 10);
+    isMotionEnabled = (splitSlider.value > 0) ? random([true, false]) : false;
+  }
+  
+  if (resetBtn.clicked(mouseX, mouseY)) {
+    isInverted = false; 
+    colorIndex = 0; 
+    isMotionEnabled = true;
+    glowSlider.value = 10; splitSlider.value = 0; speedSlider.value = 2;
+  }
+
+  glowSlider.update(mouseX, mouseY);
+  splitSlider.update(mouseX, mouseY);
+  if (isMotionEnabled && canMove) speedSlider.update(mouseX, mouseY);
+}
+
+function mouseDragged() {
+  let splitIdx = splitSlider.value;
+  let canMove = (splitIdx > 0);
+  
+  glowSlider.update(mouseX, mouseY);
+  splitSlider.update(mouseX, mouseY);
+  if (isMotionEnabled && canMove) speedSlider.update(mouseX, mouseY);
+}
+
+function windowResized() { resizeCanvas(windowWidth, windowHeight); }
+
+class IOSSwitch {
+  constructor(x, y, w, h, label) { this.x = x; this.y = y; this.w = w; this.h = h; this.label = label; this.knobX = x + h/2; }
+  display(state, textColor, disabled) {
+    let targetX = state ? (this.x + this.w - this.h/2) : (this.x + this.h/2);
+    this.knobX = lerp(this.knobX, targetX, 0.2);
+    noStroke(); 
+    fill(disabled ? '#666666' : (state ? terracotta : '#D1D1D6')); 
+    rect(this.x, this.y, this.w, this.h, this.h/2);
+    fill(255); ellipse(this.knobX, this.y + this.h/2, this.h - 4);
+    fill(textColor); textSize(9); textStyle(BOLD); textAlign(LEFT, CENTER);
+    text(this.label, this.x, this.y - 10);
+  }
+  clicked(mx, my) { return (mx > this.x && mx < this.x + this.w && my > this.y && my < this.y + this.h); }
+}
+
+class ColorButton {
+  constructor(x, y, w, h, txt) { this.x = x; this.y = y; this.w = w; this.h = h; this.txt = txt; }
+  display(bgCol, txtCol) {
+    noStroke(); fill(bgCol); rect(this.x, this.y, this.w, this.h, 4); 
+    fill(txtCol); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(9);
+    text(this.txt, this.x + this.w/2, this.y + this.h/2);
+  }
+  clicked(mx, my) { return (mx > this.x && mx < this.x + this.w && my > this.y && my < this.y + this.h); }
+}
+
+class CustomSlider {
+  constructor(x, y, w, h, min, max, val, label) { this.x = x; this.y = y; this.w = w; this.h = h; this.min = min; this.max = max; this.value = val; this.label = label; }
+  display(trackCol, disabled) {
+    let activeColor = disabled ? '#666666' : trackCol;
+    let knobColor = disabled ? '#444444' : terracotta;
+    
+    stroke(activeColor); strokeWeight(6); line(this.x, this.y+this.h/2, this.x+this.w, this.y+this.h/2);
+    let kx = map(this.value, this.min, this.max, this.x, this.x + this.w);
+    noStroke(); fill(knobColor); ellipse(kx, this.y+this.h/2, this.h);
+    fill(activeColor); textAlign(LEFT, CENTER); textSize(9); textStyle(BOLD); 
+    text(disabled ? this.label + " (OFF)" : this.label, this.x, this.y-10);
+  }
+  update(mx, my) {
+    if (mx > this.x-5 && mx < this.x+this.w+5 && my > this.y-5 && my < this.y+this.h+5) {
+      this.value = map(constrain(mx, this.x, this.x + this.w), this.x, this.x + this.w, this.min, this.max);
+    }
+  }
+}
+
+class StepSlider {
+  constructor(x, y, w, h, min, max, val) { this.x = x; this.y = y; this.w = w; this.h = h; this.min = min; this.max = max; this.value = val; }
+  display(trackCol) {
+    stroke(trackCol); strokeWeight(6); line(this.x, this.y+this.h/2, this.x+this.w, this.y+this.h/2);
+    let kx = map(this.value, this.min, this.max, this.x, this.x + this.w);
+    noStroke(); fill(terracotta); ellipse(kx, this.y+this.h/2, this.h);
+    fill(trackCol); textSize(9); textStyle(BOLD); textAlign(LEFT, CENTER); text("STRIPES", this.x, this.y-10);
+    textAlign(CENTER, CENTER); 
+    text("1", this.x, this.y+18); 
+    text("3", this.x + this.w * (1/3), this.y+18); 
+    text("5", this.x + this.w * (2/3), this.y+18); 
+    text("7", this.x + this.w, this.y+18);
+  }
+  update(mx, my) {
+    if (mx > this.x-5 && mx < this.x+this.w+5 && my > this.y-5 && my < this.y+this.h+5) {
+      this.value = round(map(constrain(mx, this.x, this.x+this.w), this.x, this.x+this.w, this.min, this.max));
+    }
+  }
+}
+</script>
+
+</body>
+</html>
